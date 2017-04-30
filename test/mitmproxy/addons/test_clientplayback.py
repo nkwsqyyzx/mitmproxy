@@ -1,8 +1,7 @@
-import os
-import mock
+import pytest
+from unittest import mock
 
 from mitmproxy.test import tflow
-from mitmproxy.test import tutils
 from mitmproxy import io
 from mitmproxy import exceptions
 
@@ -24,42 +23,51 @@ class MockThread():
 class TestClientPlayback:
     def test_playback(self):
         cp = clientplayback.ClientPlayback()
-        with taddons.context():
+        with taddons.context() as tctx:
             assert cp.count() == 0
             f = tflow.tflow(resp=True)
-            cp.load([f])
+            cp.start_replay([f])
             assert cp.count() == 1
             RP = "mitmproxy.proxy.protocol.http_replay.RequestReplayThread"
             with mock.patch(RP) as rp:
                 assert not cp.current_thread
                 cp.tick()
-                rp.assert_called()
+                assert rp.called
                 assert cp.current_thread
 
-            cp.keepserving = False
             cp.flows = None
             cp.current_thread = None
-            with mock.patch("mitmproxy.master.Master.shutdown") as sd:
-                cp.tick()
-                sd.assert_called()
+            cp.tick()
+            assert tctx.master.has_event("processing_complete")
 
             cp.current_thread = MockThread()
-            with mock.patch("mitmproxy.master.Master.shutdown") as sd:
-                cp.tick()
-                assert cp.current_thread is None
+            cp.tick()
+            assert cp.current_thread is None
 
-    def test_configure(self):
+            cp.start_replay([f])
+            cp.stop_replay()
+            assert not cp.flows
+
+    def test_load_file(self, tmpdir):
+        cp = clientplayback.ClientPlayback()
+        with taddons.context():
+            fpath = str(tmpdir.join("flows"))
+            tdump(fpath, [tflow.tflow(resp=True)])
+            cp.load_file(fpath)
+            assert cp.flows
+            with pytest.raises(exceptions.CommandError):
+                cp.load_file("/nonexistent")
+
+    def test_configure(self, tmpdir):
         cp = clientplayback.ClientPlayback()
         with taddons.context() as tctx:
-            with tutils.tmpdir() as td:
-                path = os.path.join(td, "flows")
-                tdump(path, [tflow.tflow()])
-                tctx.configure(cp, client_replay=[path])
-                tctx.configure(cp, client_replay=[])
-                tctx.configure(cp)
-                tutils.raises(
-                    exceptions.OptionsError,
-                    tctx.configure,
-                    cp,
-                    client_replay=["nonexistent"]
-                )
+            path = str(tmpdir.join("flows"))
+            tdump(path, [tflow.tflow()])
+            tctx.configure(cp, client_replay=[path])
+            cp.configured = False
+            tctx.configure(cp, client_replay=[])
+            cp.configured = False
+            tctx.configure(cp)
+            cp.configured = False
+            with pytest.raises(exceptions.OptionsError):
+                tctx.configure(cp, client_replay=["nonexistent"])

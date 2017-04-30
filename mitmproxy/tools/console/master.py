@@ -13,27 +13,26 @@ import traceback
 import urwid
 
 from mitmproxy import addons
-from mitmproxy import controller
-from mitmproxy import exceptions
+from mitmproxy import command
 from mitmproxy import master
-from mitmproxy import io
 from mitmproxy import log
-from mitmproxy.addons import view
+from mitmproxy import flow
 from mitmproxy.addons import intercept
-import mitmproxy.options
+from mitmproxy.addons import readfile
+from mitmproxy.addons import view
 from mitmproxy.tools.console import flowlist
 from mitmproxy.tools.console import flowview
 from mitmproxy.tools.console import grideditor
 from mitmproxy.tools.console import help
+from mitmproxy.tools.console import keymap
 from mitmproxy.tools.console import options
-from mitmproxy.tools.console import palettepicker
+from mitmproxy.tools.console import commands
+from mitmproxy.tools.console import overlay
 from mitmproxy.tools.console import palettes
 from mitmproxy.tools.console import signals
 from mitmproxy.tools.console import statusbar
 from mitmproxy.tools.console import window
 from mitmproxy.utils import strutils
-
-from mitmproxy.net import tcp
 
 EVENTLOG_SIZE = 10000
 
@@ -41,10 +40,139 @@ EVENTLOG_SIZE = 10000
 class Logger:
     def log(self, evt):
         signals.add_log(evt.msg, evt.level)
+        if evt.level == "alert":
+            signals.status_message.send(
+                message=str(evt.msg),
+                expire=2
+            )
+
+
+class UnsupportedLog:
+    """
+        A small addon to dump info on flow types we don't support yet.
+    """
+    def websocket_message(self, f):
+        message = f.messages[-1]
+        signals.add_log(f.message_info(message), "info")
+        signals.add_log(strutils.bytes_to_escaped_str(message.content), "debug")
+
+    def websocket_end(self, f):
+        signals.add_log("WebSocket connection closed by {}: {} {}, {}".format(
+            f.close_sender,
+            f.close_code,
+            f.close_message,
+            f.close_reason), "info")
+
+    def tcp_message(self, f):
+        message = f.messages[-1]
+        direction = "->" if message.from_client else "<-"
+        signals.add_log("{client_host}:{client_port} {direction} tcp {direction} {server_host}:{server_port}".format(
+            client_host=f.client_conn.address[0],
+            client_port=f.client_conn.address[1],
+            server_host=f.server_conn.address[0],
+            server_port=f.server_conn.address[1],
+            direction=direction,
+        ), "info")
+        signals.add_log(strutils.bytes_to_escaped_str(message.content), "debug")
+
+
+class ConsoleAddon:
+    """
+        An addon that exposes console-specific commands.
+    """
+    def __init__(self, master):
+        self.master = master
+        self.started = False
+
+    @command.command("console.command")
+    def console_command(self, partial: str) -> None:
+        """
+        Prompt the user to edit a command with a (possilby empty) starting value.
+        """
+        signals.status_prompt_command.send(partial=partial)
+
+    @command.command("console.view.commands")
+    def view_commands(self) -> None:
+        """View the commands list."""
+        self.master.view_commands()
+
+    @command.command("console.view.options")
+    def view_options(self) -> None:
+        """View the options editor."""
+        self.master.view_options()
+
+    @command.command("console.view.help")
+    def view_help(self) -> None:
+        """View help."""
+        self.master.view_help()
+
+    @command.command("console.view.flow")
+    def view_flow(self, flow: flow.Flow) -> None:
+        """View a flow."""
+        if hasattr(flow, "request"):
+            # FIME: Also set focus?
+            self.master.view_flow(flow)
+
+    @command.command("console.exit")
+    def exit(self) -> None:
+        """Exit mitmproxy."""
+        raise urwid.ExitMainLoop
+
+    @command.command("console.view.pop")
+    def view_pop(self) -> None:
+        """
+            Pop a view off the console stack. At the top level, this prompts the
+            user to exit mitmproxy.
+        """
+        signals.pop_view_state.send(self)
+
+    def running(self):
+        self.started = True
+
+    def update(self, flows):
+        if not flows:
+            signals.update_settings.send(self)
+
+    def configure(self, updated):
+        if self.started:
+            if "console_eventlog" in updated:
+                self.master.refresh_view()
+
+
+def default_keymap(km):
+    km.add(":", "console.command ''")
+    km.add("?", "console.view.help")
+    km.add("C", "console.view.commands")
+    km.add("O", "console.view.options")
+    km.add("Q", "console.exit")
+    km.add("q", "console.view.pop")
+    km.add("i", "console.command 'set intercept='")
+    km.add("W", "console.command 'set save_stream_file='")
+
+    km.add("A", "flow.resume @all", context="flowlist")
+    km.add("a", "flow.resume @focus", context="flowlist")
+    km.add("d", "view.remove @focus", context="flowlist")
+    km.add("D", "view.duplicate @focus", context="flowlist")
+    km.add("e", "set console_eventlog=toggle", context="flowlist")
+    km.add("f", "console.command 'set view_filter='", context="flowlist")
+    km.add("F", "set console_focus_follow=toggle", context="flowlist")
+    km.add("g", "view.go 0", context="flowlist")
+    km.add("G", "view.go -1", context="flowlist")
+    km.add("m", "flow.mark.toggle @focus", context="flowlist")
+    km.add("r", "replay.client @focus", context="flowlist")
+    km.add("S", "console.command 'replay.server '")
+    km.add("v", "set console_order_reversed=toggle", context="flowlist")
+    km.add("U", "flow.mark @all false", context="flowlist")
+    km.add("w", "console.command 'save.file @shown '", context="flowlist")
+    km.add("V", "flow.revert @focus", context="flowlist")
+    km.add("X", "flow.kill @focus", context="flowlist")
+    km.add("z", "view.remove @all", context="flowlist")
+    km.add("Z", "view.remove @hidden", context="flowlist")
+    km.add("|", "console.command 'script.run @focus '", context="flowlist")
+    km.add("enter", "console.view.flow @focus", context="flowlist")
 
 
 class ConsoleMaster(master.Master):
-    palette = []
 
     def __init__(self, options, server):
         super().__init__(options, server)
@@ -53,6 +181,8 @@ class ConsoleMaster(master.Master):
         self.stream_path = None
         # This line is just for type hinting
         self.options = self.options  # type: Options
+        self.keymap = keymap.Keymap(self)
+        default_keymap(self.keymap)
         self.options.errored.connect(self.options_error)
 
         self.logbuffer = urwid.SimpleListWalker([])
@@ -66,7 +196,13 @@ class ConsoleMaster(master.Master):
         signals.sig_add_log.connect(self.sig_add_log)
         self.addons.add(Logger())
         self.addons.add(*addons.default_addons())
-        self.addons.add(intercept.Intercept(), self.view)
+        self.addons.add(
+            intercept.Intercept(),
+            self.view,
+            UnsupportedLog(),
+            readfile.ReadFile(),
+            ConsoleAddon(self),
+        )
 
         def sigint_handler(*args, **kwargs):
             self.prompt_for_exit()
@@ -108,7 +244,7 @@ class ConsoleMaster(master.Master):
         self.logbuffer.append(e)
         if len(self.logbuffer) > EVENTLOG_SIZE:
             self.logbuffer.pop(0)
-        if self.options.focus_follow:
+        if self.options.console_focus_follow:
             self.logbuffer.set_focus(len(self.logbuffer) - 1)
 
     def sig_call_in(self, sender, seconds, callback, args=()):
@@ -119,7 +255,7 @@ class ConsoleMaster(master.Master):
     def sig_replace_view_state(self, sender):
         """
             A view has been pushed onto the stack, and is intended to replace
-            the current view rather tha creating a new stack entry.
+            the current view rather than creating a new stack entry.
         """
         if len(self.view_stack) > 1:
             del self.view_stack[1]
@@ -143,31 +279,9 @@ class ConsoleMaster(master.Master):
         self.loop.widget = window
         self.loop.draw_screen()
 
-    def run_script_once(self, command, f):
-        sc = self.addons.get("scriptloader")
-        try:
-            with self.handlecontext():
-                sc.run_once(command, [f])
-        except mitmproxy.exceptions.AddonError as e:
-            signals.add_log("Script error: %s" % e, "warn")
-
-    def toggle_eventlog(self):
-        self.options.eventlog = not self.options.eventlog
+    def refresh_view(self):
         self.view_flowlist()
         signals.replace_view_state.send(self)
-
-    def _readflows(self, path):
-        """
-        Utitility function that reads a list of flows
-        or prints an error to the UI if that fails.
-        Returns
-            - None, if there was an error.
-            - a list of flows, otherwise.
-        """
-        try:
-            return io.read_flows_from_paths(path)
-        except exceptions.FlowReadException as e:
-            signals.status_message.send(message=str(e))
 
     def spawn_editor(self, data):
         text = not isinstance(data, bytes)
@@ -232,8 +346,8 @@ class ConsoleMaster(master.Master):
 
     def set_palette(self, options, updated):
         self.ui.register_palette(
-            palettes.palettes[options.palette].palette(
-                options.palette_transparent
+            palettes.palettes[options.console_palette].palette(
+                options.console_palette_transparent
             )
         )
         self.ui.clear()
@@ -250,38 +364,16 @@ class ConsoleMaster(master.Master):
         self.set_palette(self.options, None)
         self.options.subscribe(
             self.set_palette,
-            ["palette", "palette_transparent"]
+            ["console_palette", "console_palette_transparent"]
         )
         self.loop = urwid.MainLoop(
             urwid.SolidFill("x"),
             screen = self.ui,
-            handle_mouse = not self.options.no_mouse,
+            handle_mouse = self.options.console_mouse,
         )
-        self.ab = statusbar.ActionBar()
-
-        if self.options.rfile:
-            ret = self.load_flows_path(self.options.rfile)
-            if ret and self.view.store_count():
-                signals.add_log(
-                    "File truncated or corrupted. "
-                    "Loaded as many flows as possible.",
-                    "error"
-                )
-            elif ret and not self.view.store_count():
-                self.shutdown()
-                print("Could not load file: {}".format(ret), file=sys.stderr)
-                sys.exit(1)
+        self.ab = statusbar.ActionBar(self)
 
         self.loop.set_alarm_in(0.01, self.ticker)
-        if self.options.http2 and not tcp.HAS_ALPN:  # pragma: no cover
-            def http2err(*args, **kwargs):
-                signals.status_message.send(
-                    message = "HTTP/2 disabled - OpenSSL 1.0.2+ required."
-                              " Use --no-http2 to silence this warning.",
-                    expire=5
-                )
-            self.loop.set_alarm_in(0.01, http2err)
-
         self.loop.set_alarm_in(
             0.0001,
             lambda *args: self.view_flowlist()
@@ -300,17 +392,34 @@ class ConsoleMaster(master.Master):
             print("Shutting down...", file=sys.stderr)
         finally:
             sys.stderr.flush()
-            self.shutdown()
+            super().shutdown()
 
-    def view_help(self, helpctx):
+    def shutdown(self):
+        raise urwid.ExitMainLoop
+
+    def overlay(self, widget, **kwargs):
+        signals.push_view_state.send(
+            self,
+            window = overlay.SimpleOverlay(
+                self,
+                widget,
+                self.loop.widget,
+                widget.width,
+                **kwargs
+            )
+        )
+
+    def view_help(self):
+        hc = self.view_stack[-1].helpctx
         signals.push_view_state.send(
             self,
             window = window.Window(
                 self,
-                help.HelpView(helpctx),
+                help.HelpView(hc),
                 None,
                 statusbar.StatusBar(self, help.footer),
-                None
+                None,
+                "help"
             )
         )
 
@@ -326,18 +435,23 @@ class ConsoleMaster(master.Master):
                 None,
                 statusbar.StatusBar(self, options.footer),
                 options.help_context,
+                "options"
             )
         )
 
-    def view_palette_picker(self):
+    def view_commands(self):
+        for i in self.view_stack:
+            if isinstance(i["body"], commands.Commands):
+                return
         signals.push_view_state.send(
             self,
             window = window.Window(
                 self,
-                palettepicker.PalettePicker(self),
+                commands.Commands(self),
                 None,
-                statusbar.StatusBar(self, palettepicker.footer),
-                palettepicker.help_context,
+                statusbar.StatusBar(self, commands.footer),
+                commands.help_context,
+                "commands"
             )
         )
 
@@ -349,7 +463,8 @@ class ConsoleMaster(master.Master):
                 ge,
                 None,
                 statusbar.StatusBar(self, grideditor.base.FOOTER),
-                ge.make_help()
+                ge.make_help(),
+                "grideditor"
             )
         )
 
@@ -357,7 +472,7 @@ class ConsoleMaster(master.Master):
         if self.ui.started:
             self.ui.clear()
 
-        if self.options.eventlog:
+        if self.options.console_eventlog:
             body = flowlist.BodyPile(self)
         else:
             body = flowlist.FlowListBox(self)
@@ -369,7 +484,8 @@ class ConsoleMaster(master.Master):
                 body,
                 None,
                 statusbar.StatusBar(self, flowlist.footer),
-                flowlist.help_context
+                flowlist.help_context,
+                "flowlist"
             )
         )
 
@@ -382,67 +498,14 @@ class ConsoleMaster(master.Master):
                 flowview.FlowView(self, self.view, flow, tab_offset),
                 flowview.FlowViewHeader(self, flow),
                 statusbar.StatusBar(self, flowview.footer),
-                flowview.help_context
+                flowview.help_context,
+                "flowview"
             )
         )
 
-    def _write_flows(self, path, flows):
-        with open(path, "wb") as f:
-            fw = io.FlowWriter(f)
-            for i in flows:
-                fw.add(i)
-
-    def save_one_flow(self, path, flow):
-        return self._write_flows(path, [flow])
-
-    def save_flows(self, path):
-        return self._write_flows(path, self.view)
-
-    def load_flows_callback(self, path):
-        ret = self.load_flows_path(path)
-        return ret or "Flows loaded from %s" % path
-
-    def load_flows_path(self, path):
-        reterr = None
-        try:
-            master.Master.load_flows_file(self, path)
-        except exceptions.FlowReadException as e:
-            reterr = str(e)
-        signals.flowlist_change.send(self)
-        return reterr
-
     def quit(self, a):
         if a != "n":
-            raise urwid.ExitMainLoop
+            self.shutdown()
 
     def clear_events(self):
         self.logbuffer[:] = []
-
-    # Handlers
-    @controller.handler
-    def websocket_message(self, f):
-        super().websocket_message(f)
-        message = f.messages[-1]
-        signals.add_log(message.info, "info")
-        signals.add_log(strutils.bytes_to_escaped_str(message.content), "debug")
-
-    @controller.handler
-    def websocket_end(self, f):
-        super().websocket_end(f)
-        signals.add_log("WebSocket connection closed by {}: {} {}, {}".format(
-            f.close_sender,
-            f.close_code,
-            f.close_message,
-            f.close_reason), "info")
-
-    @controller.handler
-    def tcp_message(self, f):
-        super().tcp_message(f)
-        message = f.messages[-1]
-        direction = "->" if message.from_client else "<-"
-        signals.add_log("{client} {direction} tcp {direction} {server}".format(
-            client=repr(f.client_conn.address),
-            server=repr(f.server_conn.address),
-            direction=direction,
-        ), "info")
-        signals.add_log(strutils.bytes_to_escaped_str(message.content), "debug")

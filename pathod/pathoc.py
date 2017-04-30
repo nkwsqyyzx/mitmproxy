@@ -11,15 +11,14 @@ import time
 import OpenSSL.crypto
 import logging
 
-from mitmproxy.test.tutils import treq
-from mitmproxy.utils import strutils
-from mitmproxy.net import tcp
 from mitmproxy import certs
+from mitmproxy import exceptions
+from mitmproxy.net import tcp
 from mitmproxy.net import websockets
 from mitmproxy.net import socks
-from mitmproxy import exceptions
-from mitmproxy.net.http import http1
+from mitmproxy.net import http as net_http
 from mitmproxy.types import basethread
+from mitmproxy.utils import strutils
 
 from pathod import log
 from pathod import language
@@ -127,8 +126,8 @@ class WebsocketFrameReader(basethread.BaseThread):
                     return
                 try:
                     r, _, _ = select.select([self.rfile], [], [], 0.05)
-                except OSError:
-                    return
+                except OSError:  # pragma: no cover
+                    return  # this is not reliably triggered due to its nature, so we exclude it from coverage.
                 delta = time.time() - starttime
                 if not r and self.timeout and delta > self.timeout:
                     return
@@ -234,24 +233,31 @@ class Pathoc(tcp.TCPClient):
                 )
             self.protocol = http2.HTTP2StateProtocol(self, dump_frames=self.http2_framedump)
         else:
-            self.protocol = http1
+            self.protocol = net_http.http1
 
         self.settings = language.Settings(
             is_client=True,
             staticdir=os.getcwd(),
             unconstrained_file_access=True,
-            request_host=self.address.host,
+            request_host=self.address[0],
             protocol=self.protocol,
         )
 
     def http_connect(self, connect_to):
-        self.wfile.write(
-            b'CONNECT %s:%d HTTP/1.1\r\n' % (connect_to[0].encode("idna"), connect_to[1]) +
-            b'\r\n'
+        req = net_http.Request(
+            first_line_format='authority',
+            method='CONNECT',
+            scheme=None,
+            host=connect_to[0].encode("idna"),
+            port=connect_to[1],
+            path=None,
+            http_version='HTTP/1.1',
+            content=b'',
         )
+        self.wfile.write(net_http.http1.assemble_request(req))
         self.wfile.flush()
         try:
-            resp = self.protocol.read_response(self.rfile, treq(method=b"CONNECT"))
+            resp = self.protocol.read_response(self.rfile, req)
             if resp.status_code != 200:
                 raise exceptions.HttpException("Unexpected status code: %s" % resp.status_code)
         except exceptions.HttpException as e:
@@ -280,7 +286,7 @@ class Pathoc(tcp.TCPClient):
                 socks.VERSION.SOCKS5,
                 socks.CMD.CONNECT,
                 socks.ATYP.DOMAINNAME,
-                tcp.Address.wrap(connect_to)
+                connect_to,
             )
             connect_request.to_file(self.wfile)
             self.wfile.flush()
@@ -435,7 +441,20 @@ class Pathoc(tcp.TCPClient):
                 req = language.serve(r, self.wfile, self.settings)
                 self.wfile.flush()
 
-                resp = self.protocol.read_response(self.rfile, treq(method=req["method"].encode()))
+                # build a dummy request to read the reponse
+                # ideally this would be returned directly from language.serve
+                dummy_req = net_http.Request(
+                    first_line_format="relative",
+                    method=req["method"],
+                    scheme=b"http",
+                    host=b"localhost",
+                    port=80,
+                    path=b"/",
+                    http_version=b"HTTP/1.1",
+                    content=b'',
+                )
+
+                resp = self.protocol.read_response(self.rfile, dummy_req)
                 resp.sslinfo = self.sslinfo
             except exceptions.HttpException as v:
                 lg("Invalid server response: %s" % v)

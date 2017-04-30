@@ -1,14 +1,13 @@
 from threading import Thread, Event
-
-from mock import Mock
-
-from mitmproxy import controller
+from unittest.mock import Mock
 import queue
+import pytest
 
 from mitmproxy.exceptions import Kill, ControlException
-from mitmproxy import proxy
+from mitmproxy import controller
 from mitmproxy import master
-from mitmproxy.test import tutils
+from mitmproxy import proxy
+from mitmproxy.test import taddons
 
 
 class TMsg:
@@ -17,22 +16,18 @@ class TMsg:
 
 class TestMaster:
     def test_simple(self):
-        class DummyMaster(master.Master):
-            @controller.handler
+        class tAddon:
             def log(self, _):
-                m.should_exit.set()
+                ctx.master.should_exit.set()
 
-            def tick(self, timeout):
-                # Speed up test
-                super().tick(0)
-
-        m = DummyMaster(None, proxy.DummyServer(None))
-        assert not m.should_exit.is_set()
-        msg = TMsg()
-        msg.reply = controller.DummyReply()
-        m.event_queue.put(("log", msg))
-        m.run()
-        assert m.should_exit.is_set()
+        with taddons.context() as ctx:
+            ctx.master.addons.add(tAddon())
+            assert not ctx.master.should_exit.is_set()
+            msg = TMsg()
+            msg.reply = controller.DummyReply()
+            ctx.master.event_queue.put(("log", msg))
+            ctx.master.run()
+            assert ctx.master.should_exit.is_set()
 
     def test_server_simple(self):
         m = master.Master(None, proxy.DummyServer(None))
@@ -65,7 +60,6 @@ class TestChannel:
         def reply():
             m, obj = q.get()
             assert m == "test"
-            obj.reply.handle()
             obj.reply.send(42)
             obj.reply.take()
             obj.reply.commit()
@@ -80,17 +74,14 @@ class TestChannel:
         done = Event()
         done.set()
         channel = controller.Channel(q, done)
-        with tutils.raises(Kill):
+        with pytest.raises(Kill):
             channel.ask("test", Mock(name="test_ask_shutdown"))
 
 
 class TestReply:
     def test_simple(self):
         reply = controller.Reply(42)
-        assert reply.state == "unhandled"
-
-        reply.handle()
-        assert reply.state == "handled"
+        assert reply.state == "start"
 
         reply.send("foo")
         assert reply.value == "foo"
@@ -98,7 +89,7 @@ class TestReply:
         reply.take()
         assert reply.state == "taken"
 
-        with tutils.raises(queue.Empty):
+        with pytest.raises(queue.Empty):
             reply.q.get_nowait()
         reply.commit()
         assert reply.state == "committed"
@@ -106,7 +97,6 @@ class TestReply:
 
     def test_kill(self):
         reply = controller.Reply(43)
-        reply.handle()
         reply.kill()
         reply.take()
         reply.commit()
@@ -114,7 +104,6 @@ class TestReply:
 
     def test_ack(self):
         reply = controller.Reply(44)
-        reply.handle()
         reply.ack()
         reply.take()
         reply.commit()
@@ -122,7 +111,6 @@ class TestReply:
 
     def test_reply_none(self):
         reply = controller.Reply(45)
-        reply.handle()
         reply.send(None)
         reply.take()
         reply.commit()
@@ -130,29 +118,26 @@ class TestReply:
 
     def test_commit_no_reply(self):
         reply = controller.Reply(46)
-        reply.handle()
         reply.take()
-        with tutils.raises(ControlException):
+        with pytest.raises(ControlException):
             reply.commit()
         reply.ack()
         reply.commit()
 
     def test_double_send(self):
         reply = controller.Reply(47)
-        reply.handle()
         reply.send(1)
-        with tutils.raises(ControlException):
+        with pytest.raises(ControlException):
             reply.send(2)
         reply.take()
         reply.commit()
 
     def test_state_transitions(self):
-        states = {"unhandled", "handled", "taken", "committed"}
+        states = {"start", "taken", "committed"}
         accept = {
-            "handle": {"unhandled"},
-            "take": {"handled"},
+            "take": {"start"},
             "commit": {"taken"},
-            "ack": {"handled", "taken"},
+            "ack": {"start", "taken"},
         }
         for fn, ok in accept.items():
             for state in states:
@@ -163,15 +148,14 @@ class TestReply:
                 if state in ok:
                     getattr(r, fn)()
                 else:
-                    with tutils.raises(ControlException):
+                    with pytest.raises(ControlException):
                         getattr(r, fn)()
                 r._state = "committed"  # hide warnings on deletion
 
     def test_del(self):
         reply = controller.Reply(47)
-        with tutils.raises(ControlException):
+        with pytest.raises(ControlException):
             reply.__del__()
-        reply.handle()
         reply.ack()
         reply.take()
         reply.commit()
@@ -181,24 +165,22 @@ class TestDummyReply:
     def test_simple(self):
         reply = controller.DummyReply()
         for _ in range(2):
-            reply.handle()
             reply.ack()
             reply.take()
             reply.commit()
             reply.mark_reset()
             reply.reset()
-        assert reply.state == "unhandled"
+        assert reply.state == "start"
 
     def test_reset(self):
         reply = controller.DummyReply()
-        reply.handle()
         reply.ack()
         reply.take()
         reply.commit()
         reply.mark_reset()
         assert reply.state == "committed"
         reply.reset()
-        assert reply.state == "unhandled"
+        assert reply.state == "start"
 
     def test_del(self):
         reply = controller.DummyReply()

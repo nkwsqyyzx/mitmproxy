@@ -6,12 +6,39 @@ import sys
 import mitmproxy.platform
 from mitmproxy.proxy.config import ProxyConfig
 from mitmproxy.proxy.server import ProxyServer
-from mitmproxy import master
-import pathod.test
-import pathod.pathoc
 from mitmproxy import controller
 from mitmproxy import options
 from mitmproxy import exceptions
+from mitmproxy import io
+import pathod.test
+import pathod.pathoc
+
+from mitmproxy import eventsequence
+from mitmproxy.test import tflow
+from mitmproxy.test import tutils
+from mitmproxy.test import taddons
+
+
+class MasterTest:
+
+    def cycle(self, master, content):
+        f = tflow.tflow(req=tutils.treq(content=content))
+        master.addons.handle_lifecycle("clientconnect", f.client_conn)
+        for i in eventsequence.iterate(f):
+            master.addons.handle_lifecycle(*i)
+        master.addons.handle_lifecycle("clientdisconnect", f.client_conn)
+        return f
+
+    def dummy_cycle(self, master, n, content):
+        for i in range(n):
+            self.cycle(master, content)
+        master.shutdown()
+
+    def flowfile(self, path):
+        with open(path, "wb") as f:
+            fw = io.FlowWriter(f)
+            t = tflow.tflow(resp=True)
+            fw.add(t)
 
 
 class TestState:
@@ -35,33 +62,24 @@ class TestState:
     #     if f not in self.flows:
     #         self.flows.append(f)
 
-    # FIXME: compat with old state - remove in favor of len(state.flows)
-    def flow_count(self):
-        return len(self.flows)
 
-
-class TestMaster(master.Master):
+class TestMaster(taddons.RecordingMaster):
 
     def __init__(self, opts, config):
         s = ProxyServer(config)
-        master.Master.__init__(self, opts, s)
+        super().__init__(opts, s)
 
     def clear_addons(self, addons):
         self.addons.clear()
         self.state = TestState()
         self.addons.add(self.state)
         self.addons.add(*addons)
-
-    def clear_log(self):
-        self.tlog = []
+        self.addons.trigger("configure", self.options.keys())
+        self.addons.trigger("running")
 
     def reset(self, addons):
         self.clear_addons(addons)
-        self.clear_log()
-
-    @controller.handler
-    def log(self, e):
-        self.tlog.append(e.msg)
+        self.clear()
 
 
 class ProxyThread(threading.Thread):
@@ -70,17 +88,18 @@ class ProxyThread(threading.Thread):
         threading.Thread.__init__(self)
         self.tmaster = tmaster
         self.name = "ProxyThread (%s:%s)" % (
-            tmaster.server.address.host, tmaster.server.address.port
+            tmaster.server.address[0],
+            tmaster.server.address[1],
         )
         controller.should_exit = False
 
     @property
     def port(self):
-        return self.tmaster.server.address.port
+        return self.tmaster.server.address[1]
 
     @property
     def tlog(self):
-        return self.tmaster.tlog
+        return self.tmaster.logs
 
     def run(self):
         self.tmaster.run()
@@ -259,7 +278,7 @@ class ReverseProxyTest(ProxyTestBase):
     @classmethod
     def get_options(cls):
         opts = ProxyTestBase.get_options()
-        opts.upstream_server = "".join(
+        s = "".join(
             [
                 "https" if cls.ssl else "http",
                 "://",
@@ -267,7 +286,7 @@ class ReverseProxyTest(ProxyTestBase):
                 str(cls.server.port)
             ]
         )
-        opts.mode = "reverse"
+        opts.mode = "reverse:" + s
         return opts
 
     def pathoc(self, sni=None):
@@ -344,9 +363,9 @@ class ChainProxyTest(ProxyTestBase):
     def get_options(cls):
         opts = super().get_options()
         if cls.chain:  # First proxy is in normal mode.
+            s = "http://127.0.0.1:%s" % cls.chain[0].port
             opts.update(
-                mode="upstream",
-                upstream_server="http://127.0.0.1:%s" % cls.chain[0].port
+                mode="upstream:" + s,
             )
         return opts
 

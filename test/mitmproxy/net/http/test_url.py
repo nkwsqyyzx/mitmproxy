@@ -1,12 +1,11 @@
 import pytest
 import sys
 
-from mitmproxy.test import tutils
 from mitmproxy.net.http import url
 
 
 def test_parse():
-    with tutils.raises(ValueError):
+    with pytest.raises(ValueError):
         url.parse("")
 
     s, h, po, pa = url.parse(b"http://foo.com:8888/test")
@@ -33,27 +32,27 @@ def test_parse():
     s, h, po, pa = url.parse(b"https://foo")
     assert po == 443
 
-    with tutils.raises(ValueError):
+    with pytest.raises(ValueError):
         url.parse(b"https://foo:bar")
 
     # Invalid IDNA
-    with tutils.raises(ValueError):
+    with pytest.raises(ValueError):
         url.parse("http://\xfafoo")
     # Invalid PATH
-    with tutils.raises(ValueError):
+    with pytest.raises(ValueError):
         url.parse("http:/\xc6/localhost:56121")
     # Null byte in host
-    with tutils.raises(ValueError):
+    with pytest.raises(ValueError):
         url.parse("http://foo\0")
     # Invalid IPv6 URL - see http://www.ietf.org/rfc/rfc2732.txt
-    with tutils.raises(ValueError):
+    with pytest.raises(ValueError):
         url.parse('http://lo[calhost')
 
 
 @pytest.mark.skipif(sys.version_info < (3, 6), reason='requires Python 3.6 or higher')
 def test_parse_port_range():
     # Port out of range
-    with tutils.raises(ValueError):
+    with pytest.raises(ValueError):
         url.parse("http://foo:999999")
 
 
@@ -84,6 +83,26 @@ surrogates_quoted = (
     '%E0%E1%E2%E3%E4%E5%E6%E7%E8%E9%EA%EB%EC%ED%EE%EF'
     '%F0%F1%F2%F3%F4%F5%F6%F7%F8%F9%FA%FB%FC%FD%FE%FF'
 )
+
+
+def test_empty_key_trailing_equal_sign():
+    """
+    Some HTTP clients don't send trailing equal signs for parameters without assigned value, e.g. they send
+        foo=bar&baz&qux=quux
+    instead of
+        foo=bar&baz=&qux=quux
+    The respective behavior of encode() should be driven by a reference string given in similar_to parameter
+    """
+    reference_without_equal = "key1=val1&key2&key3=val3"
+    reference_with_equal = "key1=val1&key2=&key3=val3"
+
+    post_data_empty_key_middle = [('one', 'two'), ('emptykey', ''), ('three', 'four')]
+    post_data_empty_key_end = [('one', 'two'), ('three', 'four'), ('emptykey', '')]
+
+    assert url.encode(post_data_empty_key_middle, similar_to = reference_with_equal) == "one=two&emptykey=&three=four"
+    assert url.encode(post_data_empty_key_end, similar_to = reference_with_equal) == "one=two&three=four&emptykey="
+    assert url.encode(post_data_empty_key_middle, similar_to = reference_without_equal) == "one=two&emptykey&three=four"
+    assert url.encode(post_data_empty_key_end, similar_to = reference_without_equal) == "one=two&three=four&emptykey"
 
 
 def test_encode():

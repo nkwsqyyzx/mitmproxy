@@ -1,5 +1,7 @@
 from mitmproxy import exceptions
 from mitmproxy import connections
+from mitmproxy import controller  # noqa
+from mitmproxy.proxy import config  # noqa
 
 
 class _LayerCodeCompletion:
@@ -12,14 +14,10 @@ class _LayerCodeCompletion:
         super().__init__(**mixin_args)
         if True:
             return
-        self.config = None
-        """@type: mitmproxy.proxy.ProxyConfig"""
-        self.client_conn = None
-        """@type: mitmproxy.connections.ClientConnection"""
-        self.server_conn = None
-        """@type: mitmproxy.connections.ServerConnection"""
-        self.channel = None
-        """@type: mitmproxy.controller.Channel"""
+        self.config = None  # type: config.ProxyConfig
+        self.client_conn = None  # type: connections.ClientConnection
+        self.server_conn = None  # type: connections.ServerConnection
+        self.channel = None  # type: controller.Channel
         self.ctx = None
         """@type: mitmproxy.proxy.protocol.Layer"""
 
@@ -74,16 +72,6 @@ class Layer(_LayerCodeCompletion):
         """
         return getattr(self.ctx, name)
 
-    @property
-    def layers(self):
-        """
-        List of all layers, including the current layer (``[self, self.ctx, self.ctx.ctx, ...]``)
-        """
-        return [self] + self.ctx.layers
-
-    def __repr__(self):
-        return type(self).__name__
-
 
 class ServerConnectionMixin:
 
@@ -111,7 +99,7 @@ class ServerConnectionMixin:
         self.server_conn = None
         if self.config.options.spoof_source_address and self.config.options.upstream_bind_address == '':
             self.server_conn = connections.ServerConnection(
-                server_address, (self.ctx.client_conn.address.host, 0), True)
+                server_address, (self.ctx.client_conn.address[0], 0), True)
         else:
             self.server_conn = connections.ServerConnection(
                 server_address, (self.config.options.upstream_bind_address, 0),
@@ -128,8 +116,8 @@ class ServerConnectionMixin:
         address = self.server_conn.address
         if address:
             self_connect = (
-                address.port == self.config.options.listen_port and
-                address.host in ("localhost", "127.0.0.1", "::1")
+                address[1] == self.config.options.listen_port and
+                address[0] in ("localhost", "127.0.0.1", "::1")
             )
             if self_connect:
                 raise exceptions.ProtocolException(
@@ -143,7 +131,7 @@ class ServerConnectionMixin:
         """
         if self.server_conn.connected():
             self.disconnect()
-        self.log("Set new server address: " + repr(address), "debug")
+        self.log("Set new server address: {}:{}".format(address[0], address[1]), "debug")
         self.server_conn.address = address
         self.__check_self_connect()
 
@@ -160,7 +148,7 @@ class ServerConnectionMixin:
 
         self.server_conn = connections.ServerConnection(
             address,
-            (self.server_conn.source_address.host, 0),
+            (self.server_conn.source_address[0], 0),
             self.config.options.spoof_source_address
         )
 

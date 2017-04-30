@@ -1,14 +1,26 @@
-# -*- coding: utf-8 -*-
+from unittest import mock
+import pytest
 
-from mitmproxy.net.http import Headers
-from mitmproxy.test.tutils import treq, raises
+from mitmproxy.net.http import Headers, Request
+from mitmproxy.test.tutils import treq
 from .test_message import _test_decoded_attr, _test_passthrough_attr
 
 
 class TestRequestData:
     def test_init(self):
-        with raises(ValueError):
+        with pytest.raises(UnicodeEncodeError):
+            treq(method="fööbär")
+        with pytest.raises(UnicodeEncodeError):
+            treq(scheme="fööbär")
+        assert treq(host="fööbär").host == "fööbär"
+        with pytest.raises(UnicodeEncodeError):
+            treq(path="/fööbär")
+        with pytest.raises(UnicodeEncodeError):
+            treq(http_version="föö/bä.r")
+        with pytest.raises(ValueError):
             treq(headers="foobar")
+        with pytest.raises(ValueError):
+            treq(content="foobar")
 
         assert isinstance(treq(headers=()).headers, Headers)
 
@@ -23,15 +35,45 @@ class TestRequestCore:
         request.host = None
         assert repr(request) == "Request(GET /path)"
 
-    def replace(self):
+    def test_make(self):
+        r = Request.make("GET", "https://example.com/")
+        assert r.method == "GET"
+        assert r.scheme == "https"
+        assert r.host == "example.com"
+        assert r.port == 443
+        assert r.path == "/"
+
+        r = Request.make("GET", "https://example.com/", "content", {"Foo": "bar"})
+        assert r.content == b"content"
+        assert r.headers["content-length"] == "7"
+        assert r.headers["Foo"] == "bar"
+
+        Request.make("GET", "https://example.com/", content=b"content")
+        with pytest.raises(TypeError):
+            Request.make("GET", "https://example.com/", content=42)
+
+        r = Request.make("GET", "https://example.com/", headers=[(b"foo", b"bar")])
+        assert r.headers["foo"] == "bar"
+
+        r = Request.make("GET", "https://example.com/", headers=({"foo": "baz"}))
+        assert r.headers["foo"] == "baz"
+
+        with pytest.raises(TypeError):
+            Request.make("GET", "https://example.com/", headers=42)
+
+    def test_replace(self):
         r = treq()
         r.path = b"foobarfoo"
         r.replace(b"foo", "bar")
-        assert r.path == b"barbarbar"
+        assert r.path == "barbarbar"
 
         r.path = b"foobarfoo"
         r.replace(b"foo", "bar", count=1)
-        assert r.path == b"barbarfoo"
+        assert r.path == "barbarfoo"
+
+        r.path = "foobarfoo"
+        r.replace("foo", "bar", count=1)
+        assert r.path == "barbarfoo"
 
     def test_first_line_format(self):
         _test_passthrough_attr(treq(), "first_line_format")
@@ -41,6 +83,7 @@ class TestRequestCore:
 
     def test_scheme(self):
         _test_decoded_attr(treq(), "scheme")
+        assert treq(scheme=None).scheme is None
 
     def test_port(self):
         _test_passthrough_attr(treq(), "port")
@@ -80,7 +123,7 @@ class TestRequestCore:
         request.host = d
         assert request.data.host == b"foo\xFF\x00bar"
 
-    def test_host_header_update(self):
+    def test_host_update_also_updates_header(self):
         request = treq()
         assert "host" not in request.headers
         request.host = "example.com"
@@ -89,6 +132,51 @@ class TestRequestCore:
         request.headers["Host"] = "foo"
         request.host = "example.org"
         assert request.headers["Host"] == "example.org"
+
+    def test_get_host_header(self):
+        no_hdr = treq()
+        assert no_hdr.host_header is None
+
+        h1 = treq(headers=(
+            (b"host", b"example.com"),
+        ))
+        assert h1.host_header == "example.com"
+
+        h2 = treq(headers=(
+            (b":authority", b"example.org"),
+        ))
+        assert h2.host_header == "example.org"
+
+        both_hdrs = treq(headers=(
+            (b"host", b"example.org"),
+            (b":authority", b"example.com"),
+        ))
+        assert both_hdrs.host_header == "example.com"
+
+    def test_modify_host_header(self):
+        h1 = treq()
+        assert "host" not in h1.headers
+        assert ":authority" not in h1.headers
+        h1.host_header = "example.com"
+        assert "host" in h1.headers
+        assert ":authority" not in h1.headers
+        h1.host_header = None
+        assert "host" not in h1.headers
+
+        h2 = treq(http_version=b"HTTP/2.0")
+        h2.host_header = "example.org"
+        assert "host" not in h2.headers
+        assert ":authority" in h2.headers
+        del h2.host_header
+        assert ":authority" not in h2.headers
+
+        both_hdrs = treq(headers=(
+            (b":authority", b"example.com"),
+            (b"host", b"example.org"),
+        ))
+        both_hdrs.host_header = "foo.example.com"
+        assert both_hdrs.headers["Host"] == "foo.example.com"
+        assert both_hdrs.headers[":authority"] == "foo.example.com"
 
 
 class TestRequestUtils:
@@ -105,7 +193,7 @@ class TestRequestUtils:
         assert request.port == 42
         assert request.path == "/foo"
 
-        with raises(ValueError):
+        with pytest.raises(ValueError):
             request.url = "not-a-url"
 
     def test_url_options(self):
@@ -170,6 +258,9 @@ class TestRequestUtils:
         request.query["foo"] = "bar"
         assert request.query["foo"] == "bar"
         assert request.path == "/path?foo=bar"
+        request.query = [('foo', 'bar')]
+        assert request.query["foo"] == "bar"
+        assert request.path == "/path?foo=bar"
 
     def test_get_cookies_none(self):
         request = treq()
@@ -204,6 +295,9 @@ class TestRequestUtils:
         result = request.cookies
         result["cookiename"] = "foo"
         assert request.cookies["cookiename"] == "foo"
+        request.cookies = [["one", "uno"], ["two", "due"]]
+        assert request.cookies["one"] == "uno"
+        assert request.cookies["two"] == "due"
 
     def test_get_path_components(self):
         request = treq(path=b"/foo/bar")
@@ -256,6 +350,8 @@ class TestRequestUtils:
 
         request.headers["Content-Type"] = "application/x-www-form-urlencoded"
         assert list(request.urlencoded_form.items()) == [("foobar", "baz")]
+        request.raw_content = b"\xFF"
+        assert len(request.urlencoded_form) == 0
 
     def test_set_urlencoded_form(self):
         request = treq()
@@ -269,3 +365,12 @@ class TestRequestUtils:
 
         request.headers["Content-Type"] = "multipart/form-data"
         assert list(request.multipart_form.items()) == []
+
+        with mock.patch('mitmproxy.net.http.multipart.decode') as m:
+            m.side_effect = ValueError
+            assert list(request.multipart_form.items()) == []
+
+    def test_set_multipart_form(self):
+        request = treq(content=b"foobar")
+        with pytest.raises(NotImplementedError):
+            request.multipart_form = "foobar"

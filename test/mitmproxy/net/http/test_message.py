@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 
+import pytest
+
 from mitmproxy.test import tutils
 from mitmproxy.net import http
 
@@ -36,14 +38,12 @@ def _test_decoded_attr(message, attr):
 
 
 class TestMessageData:
-    def test_eq_ne(self):
+    def test_eq(self):
         data = tutils.tresp(timestamp_start=42, timestamp_end=42).data
         same = tutils.tresp(timestamp_start=42, timestamp_end=42).data
         assert data == same
-        assert not data != same
 
         other = tutils.tresp(content=b"foo").data
-        assert not data == other
         assert data != other
 
         assert data != 0
@@ -59,10 +59,8 @@ class TestMessage:
         resp = tutils.tresp(timestamp_start=42, timestamp_end=42)
         same = tutils.tresp(timestamp_start=42, timestamp_end=42)
         assert resp == same
-        assert not resp != same
 
         other = tutils.tresp(timestamp_start=0, timestamp_end=0)
-        assert not resp == other
         assert resp != other
 
         assert resp != 0
@@ -129,14 +127,14 @@ class TestMessageContentEncoding:
         r.decode()
         assert r.raw_content == b"foo"
 
-        with tutils.raises(TypeError):
+        with pytest.raises(TypeError):
             r.content = u"foo"
 
     def test_unknown_ce(self):
         r = tutils.tresp()
         r.headers["content-encoding"] = "zopfli"
         r.raw_content = b"foo"
-        with tutils.raises(ValueError):
+        with pytest.raises(ValueError):
             assert r.content
         assert r.headers["content-encoding"]
         assert r.get_content(strict=False) == b"foo"
@@ -145,7 +143,7 @@ class TestMessageContentEncoding:
         r = tutils.tresp()
         r.headers["content-encoding"] = "utf8"
         r.raw_content = b"foo"
-        with tutils.raises(ValueError):
+        with pytest.raises(ValueError):
             assert r.content
         assert r.headers["content-encoding"]
         assert r.get_content(strict=False) == b"foo"
@@ -154,12 +152,12 @@ class TestMessageContentEncoding:
         r = tutils.tresp()
         r.encode("gzip")
         r.raw_content = b"foo"
-        with tutils.raises(ValueError):
+        with pytest.raises(ValueError):
             assert r.content
         assert r.headers["content-encoding"]
         assert r.get_content(strict=False) == b"foo"
 
-        with tutils.raises(ValueError):
+        with pytest.raises(ValueError):
             r.decode()
         assert r.raw_content == b"foo"
         assert "content-encoding" in r.headers
@@ -188,7 +186,7 @@ class TestMessageContentEncoding:
         assert "content-encoding" not in r.headers
         assert r.raw_content == b"foo"
 
-        with tutils.raises(ValueError):
+        with pytest.raises(ValueError):
             r.encode("zopfli")
         assert r.raw_content == b"foo"
         assert "content-encoding" not in r.headers
@@ -240,7 +238,7 @@ class TestMessageText:
         r = tutils.tresp()
         r.headers["content-type"] = "text/html; charset=wtf"
         r.raw_content = b"foo"
-        with tutils.raises(ValueError):
+        with pytest.raises(ValueError):
             assert r.text == u"foo"
         assert r.get_text(strict=False) == u"foo"
 
@@ -248,7 +246,7 @@ class TestMessageText:
         r = tutils.tresp()
         r.headers["content-type"] = "text/html; charset=utf8"
         r.raw_content = b"\xFF"
-        with tutils.raises(ValueError):
+        with pytest.raises(ValueError):
             assert r.text
 
         assert r.get_text(strict=False) == '\udcff'

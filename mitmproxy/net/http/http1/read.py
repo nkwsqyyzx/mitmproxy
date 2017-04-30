@@ -158,8 +158,9 @@ def connection_close(http_version, headers):
     """
         Checks the message to see if the client connection should be closed
         according to RFC 2616 Section 8.1.
+        If we don't have a Connection header, HTTP 1.1 connections are assumed
+        to be persistent.
     """
-    # At first, check if we have an explicit Connection header.
     if "connection" in headers:
         tokens = get_header_tokens(headers, "connection")
         if "close" in tokens:
@@ -167,9 +168,7 @@ def connection_close(http_version, headers):
         elif "keep-alive" in tokens:
             return False
 
-    # If we don't have a Connection header, HTTP 1.1 connections are assumed to
-    # be persistent
-    return http_version != "HTTP/1.1" and http_version != b"HTTP/1.1"  # FIXME: Remove one case.
+    return http_version != "HTTP/1.1" and http_version != b"HTTP/1.1"
 
 
 def expected_http_body_size(request, response=None):
@@ -228,7 +227,7 @@ def _get_first_line(rfile):
         if line == b"\r\n" or line == b"\n":
             # Possible leftover from previous message
             line = rfile.readline()
-    except exceptions.TcpDisconnect:
+    except (exceptions.TcpDisconnect, exceptions.TlsException):
         raise exceptions.HttpReadDisconnect("Remote disconnected")
     if not line:
         raise exceptions.HttpReadDisconnect("Remote disconnected")
@@ -272,7 +271,9 @@ def _parse_authority_form(hostport):
             ValueError, if the input is malformed
     """
     try:
-        host, port = hostport.split(b":")
+        host, port = hostport.rsplit(b":", 1)
+        if host.startswith(b"[") and host.endswith(b"]"):
+            host = host[1:-1]
         port = int(port)
         if not check.is_valid_host(host) or not check.is_valid_port(port):
             raise ValueError()

@@ -15,9 +15,11 @@ from mitmproxy.net.http import status_codes
 from mitmproxy.tools.console import common
 from mitmproxy.tools.console import flowdetailview
 from mitmproxy.tools.console import grideditor
+from mitmproxy.tools.console import overlay
 from mitmproxy.tools.console import searchable
 from mitmproxy.tools.console import signals
 from mitmproxy.tools.console import tabs
+import mitmproxy.tools.console.master # noqa
 
 
 class SearchError(Exception):
@@ -102,7 +104,11 @@ footer = [
 
 class FlowViewHeader(urwid.WidgetWrap):
 
-    def __init__(self, master: "mitmproxy.console.master.ConsoleMaster", f: http.HTTPFlow):
+    def __init__(
+        self,
+        master: "mitmproxy.tools.console.master.ConsoleMaster",
+        f: http.HTTPFlow
+    ) -> None:
         self.master = master
         self.flow = f
         self._w = common.format_flow(
@@ -237,11 +243,10 @@ class FlowView(tabs.Tabs):
         return description, text_objects
 
     def viewmode_get(self):
-        override = self.view.settings[self.flow].get(
+        return self.view.settings[self.flow].get(
             (self.tab_offset, "prettyview"),
-            None
+            self.master.options.default_contentview
         )
-        return self.master.options.default_contentview if override is None else override
 
     def conn_text(self, conn):
         if conn:
@@ -483,11 +488,8 @@ class FlowView(tabs.Tabs):
         return self._view_nextprev_flow(self.view.index(flow) - 1, flow)
 
     def change_this_display_mode(self, t):
-        view = contentviews.get_by_shortcut(t)
-        if view:
-            self.view.settings[self.flow][(self.tab_offset, "prettyview")] = view.name
-        else:
-            self.view.settings[self.flow][(self.tab_offset, "prettyview")] = None
+        view = contentviews.get(t)
+        self.view.settings[self.flow][(self.tab_offset, "prettyview")] = view.name.lower()
         signals.flow_change.send(self, flow=self.flow)
 
     def keypress(self, size, key):
@@ -607,13 +609,14 @@ class FlowView(tabs.Tabs):
             signals.flow_change.send(self, flow = self.flow)
             signals.status_message.send(message="Loading all body data...")
         elif key == "m":
-            p = list(contentviews.view_prompts)
-            p.insert(0, ("Clear", "C"))
-            signals.status_prompt_onekey.send(
-                self,
-                prompt = "Display mode",
-                keys = p,
-                callback = self.change_this_display_mode
+            opts = [i.name.lower() for i in contentviews.views]
+            self.master.overlay(
+                overlay.Chooser(
+                    "display mode",
+                    opts,
+                    self.viewmode_get(),
+                    self.change_this_display_mode
+                )
             )
         elif key == "E":
             if self.tab_offset == TAB_REQ:
@@ -653,8 +656,8 @@ class FlowView(tabs.Tabs):
                     )
         elif key == "z":
             self.flow.backup()
-            e = conn.headers.get("content-encoding", "identity")
-            if e != "identity":
+            enc = conn.headers.get("content-encoding", "identity")
+            if enc != "identity":
                 try:
                     conn.decode()
                 except ValueError:
@@ -681,7 +684,7 @@ class FlowView(tabs.Tabs):
         encoding_map = {
             "z": "gzip",
             "d": "deflate",
-            "b": "brotli",
+            "b": "br",
         }
         conn.encode(encoding_map[key])
         signals.flow_change.send(self, flow = self.flow)

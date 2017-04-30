@@ -1,8 +1,7 @@
-import mock
+from unittest import mock
 import pytest
 
 from mitmproxy.net.http import encoding
-from mitmproxy.test import tutils
 
 
 @pytest.mark.parametrize("encoder", [
@@ -12,7 +11,7 @@ from mitmproxy.test import tutils
 def test_identity(encoder):
     assert b"string" == encoding.decode(b"string", encoder)
     assert b"string" == encoding.encode(b"string", encoder)
-    with tutils.raises(ValueError):
+    with pytest.raises(ValueError):
         encoding.encode(b"string", "nonexistent encoding")
 
 
@@ -22,16 +21,14 @@ def test_identity(encoder):
     'deflate',
 ])
 def test_encoders(encoder):
-    assert "" == encoding.decode("", encoder)
+    """
+        This test is for testing byte->byte encoding/decoding
+    """
+    assert encoding.decode(None, encoder) is None
+    assert encoding.encode(None, encoder) is None
+
     assert b"" == encoding.decode(b"", encoder)
 
-    assert "string" == encoding.decode(
-        encoding.encode(
-            "string",
-            encoder
-        ),
-        encoder
-    )
     assert b"string" == encoding.decode(
         encoding.encode(
             b"string",
@@ -40,8 +37,39 @@ def test_encoders(encoder):
         encoder
     )
 
-    with tutils.raises(ValueError):
+    with pytest.raises(TypeError):
+        encoding.encode("string", encoder)
+
+    with pytest.raises(TypeError):
+        encoding.decode("string", encoder)
+    with pytest.raises(ValueError):
         encoding.decode(b"foobar", encoder)
+
+
+@pytest.mark.parametrize("encoder", [
+    'utf8',
+    'latin-1'
+])
+def test_encoders_strings(encoder):
+    """
+        This test is for testing byte->str decoding
+        and str->byte encoding
+    """
+    assert "" == encoding.decode(b"", encoder)
+
+    assert "string" == encoding.decode(
+        encoding.encode(
+            "string",
+            encoder
+        ),
+        encoder
+    )
+
+    with pytest.raises(TypeError):
+        encoding.encode(b"string", encoder)
+
+    with pytest.raises(TypeError):
+        encoding.decode("foobar", encoder)
 
 
 def test_cache():

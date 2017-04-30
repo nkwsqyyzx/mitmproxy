@@ -1,5 +1,8 @@
+import os
 import re
+
 import urwid
+
 from mitmproxy import exceptions
 from mitmproxy import flowfilter
 from mitmproxy.addons import script
@@ -87,6 +90,9 @@ class ReplaceEditor(base.GridEditor):
                 re.compile(val)
             except re.error:
                 return "Invalid regular expression."
+        elif col == 2:
+            if val.startswith("@") and not os.path.isfile(os.path.expanduser(val[1:])):
+                return "Invalid file path"
         return False
 
 
@@ -239,3 +245,23 @@ class SetCookieEditor(base.GridEditor):
                 ]
             )
         return vals
+
+
+class OptionsEditor(base.GridEditor):
+    title = None  # type: str
+    columns = [
+        col_text.Column("")
+    ]
+
+    def __init__(self, master, name, vals):
+        self.name = name
+        super().__init__(master, [[i] for i in vals], self.callback)
+
+    def callback(self, vals):
+        try:
+            setattr(self.master.options, self.name, [i[0] for i in vals])
+        except exceptions.OptionsError as v:
+            signals.status_message.send(message=str(v))
+
+    def is_error(self, col, val):
+        pass

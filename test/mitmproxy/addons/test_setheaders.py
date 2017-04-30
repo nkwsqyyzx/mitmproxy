@@ -1,21 +1,28 @@
+import pytest
+
 from mitmproxy.test import tflow
-from mitmproxy.test import tutils
 from mitmproxy.test import taddons
 
 from mitmproxy.addons import setheaders
-from mitmproxy import options
 
 
 class TestSetHeaders:
+    def test_parse_setheaders(self):
+        x = setheaders.parse_setheader("/foo/bar/voing")
+        assert x == ("foo", "bar", "voing")
+        x = setheaders.parse_setheader("/foo/bar/vo/ing/")
+        assert x == ("foo", "bar", "vo/ing/")
+        x = setheaders.parse_setheader("/bar/voing")
+        assert x == (".*", "bar", "voing")
+        with pytest.raises(Exception, match="Invalid replacement"):
+            setheaders.parse_setheader("/")
+
     def test_configure(self):
         sh = setheaders.SetHeaders()
-        o = options.Options(
-            setheaders = [("~b", "one", "two")]
-        )
-        tutils.raises(
-            "invalid setheader filter pattern",
-            sh.configure, o, o.keys()
-        )
+        with taddons.context() as tctx:
+            with pytest.raises(Exception, match="Invalid setheader filter pattern"):
+                tctx.configure(sh, setheaders = ["/~b/one/two"])
+            tctx.configure(sh, setheaders = ["/foo/bar/voing"])
 
     def test_setheaders(self):
         sh = setheaders.SetHeaders()
@@ -23,8 +30,8 @@ class TestSetHeaders:
             tctx.configure(
                 sh,
                 setheaders = [
-                    ("~q", "one", "two"),
-                    ("~s", "one", "three")
+                    "/~q/one/two",
+                    "/~s/one/three"
                 ]
             )
             f = tflow.tflow()
@@ -40,8 +47,8 @@ class TestSetHeaders:
             tctx.configure(
                 sh,
                 setheaders = [
-                    ("~s", "one", "two"),
-                    ("~s", "one", "three")
+                    "/~s/one/two",
+                    "/~s/one/three"
                 ]
             )
             f = tflow.tflow(resp=True)
@@ -53,8 +60,8 @@ class TestSetHeaders:
             tctx.configure(
                 sh,
                 setheaders = [
-                    ("~q", "one", "two"),
-                    ("~q", "one", "three")
+                    "/~q/one/two",
+                    "/~q/one/three"
                 ]
             )
             f = tflow.tflow()

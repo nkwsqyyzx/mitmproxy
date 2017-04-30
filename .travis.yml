@@ -5,6 +5,8 @@ env:
   global:
     - CI_DEPS=codecov>=2.0.5
     - CI_COMMANDS=codecov
+git:
+  depth: 10000
 
 matrix:
   fast_finish: true
@@ -42,11 +44,22 @@ matrix:
           packages:
             - libssl-dev
     - python: 3.5
+      env: TOXENV=individual_coverage
+    - python: 3.5
       env: TOXENV=docs
-      git:
-        depth: 10000
-  allow_failures:
-    - python: pypy
+    - language: node_js
+      node_js: "node"
+      before_install:
+          - curl -o- -L https://yarnpkg.com/install.sh | bash
+          - export PATH=$HOME/.yarn/bin:$PATH
+      install:
+          - cd web && yarn
+          - yarn global add codecov
+      script: npm test && codecov
+      cache:
+          yarn: true
+          directories:
+              - web/node_modules
 
 install:
   - |
@@ -63,7 +76,7 @@ install:
   - pip install tox
 
 script:
-  - tox -- --cov mitmproxy --cov pathod -v
+  - tox -- --verbose --cov-report=term
   - |
     if [[ $BDIST == "1" ]]
     then

@@ -11,6 +11,7 @@ MANIFEST
 .cache/
 .tox*/
 build/
+mitmproxy/contrib/kaitaistruct/*.ksy
 
 # UI
 
@@ -19,3 +20,6 @@ bower_components
 *.map
 sslkeylogfile.log
 .tox/
+.python-version
+coverage.xml
+web/coverage/

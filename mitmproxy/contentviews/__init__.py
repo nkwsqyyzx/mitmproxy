@@ -36,12 +36,14 @@ def get(name: str) -> Optional[View]:
     for i in views:
         if i.name.lower() == name.lower():
             return i
+    return None
 
 
 def get_by_shortcut(c: str) -> Optional[View]:
     for i in views:
         if i.prompt[1] == c:
             return i
+    return None
 
 
 def add(view: View) -> None:
@@ -159,6 +161,7 @@ def get_content_view(viewmode: View, data: bytes, **metadata):
     return desc, safe_to_print(content), error
 
 
+# The order in which ContentViews are added is important!
 add(auto.ViewAuto())
 add(raw.ViewRaw())
 add(hex.ViewHex())
@@ -172,9 +175,7 @@ add(urlencoded.ViewURLEncoded())
 add(multipart.ViewMultipart())
 add(image.ViewImage())
 add(query.ViewQuery())
-
-if protobuf.ViewProtobuf.is_available():
-    add(protobuf.ViewProtobuf())
+add(protobuf.ViewProtobuf())
 
 __all__ = [
     "View", "VIEW_CUTOFF", "KEY_MAX", "format_text", "format_dict",

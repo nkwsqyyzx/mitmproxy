@@ -1,9 +1,9 @@
+import pytest
+
 from mitmproxy.test import tflow
-from mitmproxy.test import tutils
 from mitmproxy.test import taddons
 
 from mitmproxy.addons import stickycookie
-from mitmproxy import options
 from mitmproxy.test import tutils as ntutils
 
 
@@ -15,11 +15,14 @@ def test_domain_match():
 class TestStickyCookie:
     def test_config(self):
         sc = stickycookie.StickyCookie()
-        o = options.Options(stickycookie = "~b")
-        tutils.raises(
-            "invalid filter",
-            sc.configure, o, o.keys()
-        )
+        with taddons.context() as tctx:
+            with pytest.raises(Exception, match="invalid filter"):
+                tctx.configure(sc, stickycookie="~b")
+
+            tctx.configure(sc, stickycookie="foo")
+            assert sc.flt
+            tctx.configure(sc, stickycookie=None)
+            assert not sc.flt
 
     def test_simple(self):
         sc = stickycookie.StickyCookie()
@@ -36,7 +39,6 @@ class TestStickyCookie:
             assert "cookie" not in f.request.headers
 
             f = f.copy()
-            f.reply.acked = False
             sc.request(f)
             assert f.request.headers["cookie"] == "foo=bar"
 
@@ -108,8 +110,8 @@ class TestStickyCookie:
             f.response.headers["Set-Cookie"] = c2
             sc.response(f)
             googlekey = list(sc.jar.keys())[0]
-            assert len(sc.jar[googlekey].keys()) == 1
-            assert list(sc.jar[googlekey]["somecookie"].items())[0][1] == "newvalue"
+            assert len(sc.jar[googlekey]) == 1
+            assert sc.jar[googlekey]["somecookie"] == "newvalue"
 
     def test_response_delete(self):
         sc = stickycookie.StickyCookie()

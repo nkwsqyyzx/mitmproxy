@@ -1,17 +1,18 @@
 from mitmproxy.addons import wsgiapp
 from mitmproxy.addons.onboardingapp import app
+from mitmproxy import ctx
 
 
 class Onboarding(wsgiapp.WSGIApp):
+    name = "onboarding"
+
     def __init__(self):
         super().__init__(app.Adapter(app.application), None, None)
-        self.enabled = False
 
-    def configure(self, options, updated):
-        self.host = options.app_host
-        self.port = options.app_port
-        self.enabled = options.app
+    def configure(self, updated):
+        self.host = ctx.options.onboarding_host
+        self.port = ctx.options.onboarding_port
 
     def request(self, f):
-        if self.enabled:
+        if ctx.options.onboarding:
             super().request(f)

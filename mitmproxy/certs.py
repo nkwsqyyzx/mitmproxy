@@ -3,8 +3,8 @@ import ssl
 import time
 import datetime
 import ipaddress
-
 import sys
+
 from pyasn1.type import univ, constraint, char, namedtype, tag
 from pyasn1.codec.der.decoder import decode
 from pyasn1.error import PyAsn1Error
@@ -13,8 +13,8 @@ import OpenSSL
 from mitmproxy.types import serializable
 
 # Default expiry must not be too long: https://github.com/mitmproxy/mitmproxy/issues/815
-
 DEFAULT_EXP = 94608000  # = 24 * 60 * 60 * 365 * 3
+
 # Generated with "openssl dhparam". It's too slow to generate this on startup.
 DEFAULT_DHPARAM = b"""
 -----BEGIN DH PARAMETERS-----
@@ -93,9 +93,9 @@ def dummy_cert(privkey, cacert, commonname, sans):
         try:
             ipaddress.ip_address(i.decode("ascii"))
         except ValueError:
-            ss.append(b"DNS: %s" % i)
+            ss.append(b"DNS:%s" % i)
         else:
-            ss.append(b"IP: %s" % i)
+            ss.append(b"IP:%s" % i)
     ss = b", ".join(ss)
 
     cert = OpenSSL.crypto.X509()
@@ -356,14 +356,14 @@ class CertStore:
 
 
 class _GeneralName(univ.Choice):
-    # We are only interested in dNSNames. We use a default handler to ignore
-    # other types.
-    # TODO: We should also handle iPAddresses.
+    # We only care about dNSName and iPAddress
     componentType = namedtype.NamedTypes(
         namedtype.NamedType('dNSName', char.IA5String().subtype(
             implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 2)
-        )
-        ),
+        )),
+        namedtype.NamedType('iPAddress', univ.OctetString().subtype(
+            implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 7)
+        )),
     )
 
 
@@ -383,9 +383,6 @@ class SSLCert(serializable.Serializable):
 
     def __eq__(self, other):
         return self.digest("sha256") == other.digest("sha256")
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
 
     def get_state(self):
         return self.to_pem()
@@ -477,5 +474,10 @@ class SSLCert(serializable.Serializable):
                 except PyAsn1Error:
                     continue
                 for i in dec[0]:
-                    altnames.append(i[0].asOctets())
+                    if i[0] is None and isinstance(i[1], univ.OctetString) and not isinstance(i[1], char.IA5String):
+                        # This would give back the IP address: b'.'.join([str(e).encode() for e in i[1].asNumbers()])
+                        continue
+                    else:
+                        e = i[0].asOctets()
+                    altnames.append(e)
         return altnames

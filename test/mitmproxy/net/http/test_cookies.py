@@ -1,9 +1,9 @@
 import time
+import pytest
+from unittest import mock
 
 from mitmproxy.net.http import cookies
-from mitmproxy.test.tutils import raises
 
-import mock
 
 cookie_pairs = [
     [
@@ -270,7 +270,7 @@ def test_refresh_cookie():
     assert "00:21:38" in cookies.refresh_set_cookie_header(c, 60)
 
     c = "foo,bar"
-    with raises(ValueError):
+    with pytest.raises(ValueError):
         cookies.refresh_set_cookie_header(c, 60)
 
     # https://github.com/mitmproxy/mitmproxy/issues/773
@@ -282,6 +282,10 @@ def test_refresh_cookie():
     assert cookies.refresh_set_cookie_header(c, 0)
     c = "foo/bar=bla"
     assert cookies.refresh_set_cookie_header(c, 0)
+
+    # https://github.com/mitmproxy/mitmproxy/issues/2250
+    c = ""
+    assert cookies.refresh_set_cookie_header(c, 60) == ""
 
 
 @mock.patch('time.time')

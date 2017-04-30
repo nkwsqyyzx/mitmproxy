@@ -1,20 +1,22 @@
 import io
+import shutil
+import pytest
+from unittest import mock
+
 from mitmproxy.test import tflow
 from mitmproxy.test import taddons
 from mitmproxy.test import tutils
 
 from mitmproxy.addons import dumper
 from mitmproxy import exceptions
-from mitmproxy.tools import dump
 from mitmproxy import http
-import shutil
-import mock
+from mitmproxy import options
 
 
 def test_configure():
     d = dumper.Dumper()
-    with taddons.context(options=dump.Options()) as ctx:
-        ctx.configure(d, filtstr="~b foo")
+    with taddons.context(options=options.Options()) as ctx:
+        ctx.configure(d, view_filter="~b foo")
         assert d.filter
 
         f = tflow.tflow(resp=True)
@@ -22,16 +24,17 @@ def test_configure():
         f.response.content = b"foo"
         assert d.match(f)
 
-        ctx.configure(d, filtstr=None)
+        ctx.configure(d, view_filter=None)
         assert not d.filter
-        tutils.raises(exceptions.OptionsError, ctx.configure, d, filtstr="~~")
+        with pytest.raises(exceptions.OptionsError):
+            ctx.configure(d, view_filter="~~")
         assert not d.filter
 
 
 def test_simple():
     sio = io.StringIO()
     d = dumper.Dumper(sio)
-    with taddons.context(options=dump.Options()) as ctx:
+    with taddons.context(options=options.Options()) as ctx:
         ctx.configure(d, flow_detail=0)
         d.response(tflow.tflow(resp=True))
         assert not sio.getvalue()
@@ -65,9 +68,8 @@ def test_simple():
         ctx.configure(d, flow_detail=4)
         flow = tflow.tflow()
         flow.request = tutils.treq()
-        flow.request.stickycookie = True
         flow.client_conn = mock.MagicMock()
-        flow.client_conn.address.host = "foo"
+        flow.client_conn.address[0] = "foo"
         flow.response = tutils.tresp(content=None)
         flow.response.is_replay = True
         flow.response.status_code = 300
@@ -100,7 +102,7 @@ def test_echo_body():
 
     sio = io.StringIO()
     d = dumper.Dumper(sio)
-    with taddons.context(options=dump.Options()) as ctx:
+    with taddons.context(options=options.Options()) as ctx:
         ctx.configure(d, flow_detail=3)
         d._echo_message(f.response)
         t = sio.getvalue()
@@ -110,7 +112,7 @@ def test_echo_body():
 def test_echo_request_line():
     sio = io.StringIO()
     d = dumper.Dumper(sio)
-    with taddons.context(options=dump.Options()) as ctx:
+    with taddons.context(options=options.Options()) as ctx:
         ctx.configure(d, flow_detail=3, showhost=True)
         f = tflow.tflow(client_conn=None, server_conn=True, resp=True)
         f.request.is_replay = True
@@ -145,18 +147,18 @@ class TestContentView:
         view_auto.side_effect = exceptions.ContentViewException("")
         sio = io.StringIO()
         d = dumper.Dumper(sio)
-        with taddons.context(options=dump.Options()) as ctx:
+        with taddons.context(options=options.Options()) as ctx:
             ctx.configure(d, flow_detail=4, verbosity=3)
             d.response(tflow.tflow())
-            assert "Content viewer failed" in ctx.master.event_log[0][1]
+            assert ctx.master.has_log("content viewer failed")
 
 
 def test_tcp():
     sio = io.StringIO()
     d = dumper.Dumper(sio)
-    with taddons.context(options=dump.Options()) as ctx:
+    with taddons.context(options=options.Options()) as ctx:
         ctx.configure(d, flow_detail=3, showhost=True)
-        f = tflow.ttcpflow(client_conn=True, server_conn=True)
+        f = tflow.ttcpflow()
         d.tcp_message(f)
         assert "it's me" in sio.getvalue()
         sio.truncate(0)
@@ -164,3 +166,21 @@ def test_tcp():
         f = tflow.ttcpflow(client_conn=True, err=True)
         d.tcp_error(f)
         assert "Error in TCP" in sio.getvalue()
+
+
+def test_websocket():
+    sio = io.StringIO()
+    d = dumper.Dumper(sio)
+    with taddons.context(options=options.Options()) as ctx:
+        ctx.configure(d, flow_detail=3, showhost=True)
+        f = tflow.twebsocketflow()
+        d.websocket_message(f)
+        assert "it's me" in sio.getvalue()
+        sio.truncate(0)
+
+        d.websocket_end(f)
+        assert "WebSocket connection closed by" in sio.getvalue()
+
+        f = tflow.twebsocketflow(client_conn=True, err=True)
+        d.websocket_error(f)
+        assert "Error in WebSocket" in sio.getvalue()

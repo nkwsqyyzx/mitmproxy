@@ -1,24 +1,25 @@
-import React, { PropTypes } from 'react'
+import React  from 'react'
+import PropTypes from 'prop-types'
 import { connect } from 'react-redux'
 import ViewSelector from './ViewSelector'
 import UploadContentButton from './UploadContentButton'
 import DownloadContentButton from './DownloadContentButton'
 
 ContentViewOptions.propTypes = {
-    flow: React.PropTypes.object.isRequired,
-    message: React.PropTypes.object.isRequired,
+    flow: PropTypes.object.isRequired,
+    message: PropTypes.object.isRequired,
 }
 
 function ContentViewOptions({ flow, message, uploadContent, readonly, contentViewDescription }) {
     return (
         <div className="view-options">
-            <ViewSelector message={message}/>
+            {readonly ? <ViewSelector message={message}/> : <span><b>View:</b> edit</span>}
             &nbsp;
             <DownloadContentButton flow={flow} message={message}/>
             &nbsp;
             {!readonly && <UploadContentButton uploadContent={uploadContent}/> }
             &nbsp;
-            <span>{contentViewDescription}</span>
+            {readonly && <span>{contentViewDescription}</span>}
         </div>
     )
 }

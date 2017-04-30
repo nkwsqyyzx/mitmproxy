@@ -7,10 +7,12 @@ from typing import Iterable
 from typing import Optional
 from typing import Sequence
 from typing import Tuple
+from typing import Set # noqa
 
 import urwid
 from mitmproxy.tools.console import common
 from mitmproxy.tools.console import signals
+import mitmproxy.tools.console.master # noqa
 
 FOOTER = [
     ('heading_key', "enter"), ":edit ",
@@ -34,7 +36,7 @@ class Cell(urwid.WidgetWrap):
 
 
 class Column(metaclass=abc.ABCMeta):
-    subeditor = None
+    subeditor = None  # type: urwid.Edit
 
     def __init__(self, heading):
         self.heading = heading
@@ -62,13 +64,13 @@ class GridRow(urwid.WidgetWrap):
             editing: bool,
             editor: "GridEditor",
             values: Tuple[Iterable[bytes], Container[int]]
-    ):
+    ) -> None:
         self.focused = focused
         self.editor = editor
         self.edit_col = None  # type: Optional[Cell]
 
         errors = values[1]
-        self.fields = []
+        self.fields = []  # type: Sequence[Any]
         for i, v in enumerate(values[0]):
             if focused == i and editing:
                 self.edit_col = self.editor.columns[i].Edit(v)
@@ -116,8 +118,8 @@ class GridWalker(urwid.ListWalker):
             self,
             lst: Iterable[list],
             editor: "GridEditor"
-    ):
-        self.lst = [(i, set()) for i in lst]
+    ) -> None:
+        self.lst = [(i, set()) for i in lst]  # type: Sequence[Tuple[Any, Set]]
         self.editor = editor
         self.focus = 0
         self.focus_col = 0
@@ -182,12 +184,12 @@ class GridWalker(urwid.ListWalker):
             self.edit_row = GridRow(
                 self.focus_col, True, self.editor, self.lst[self.focus]
             )
-            self.editor.master.loop.widget.footer.update(FOOTER_EDITING)
+            signals.footer_help.send(self, helptext=FOOTER_EDITING)
             self._modified()
 
     def stop_edit(self):
         if self.edit_row:
-            self.editor.master.loop.widget.footer.update(FOOTER)
+            signals.footer_help.send(self, helptext=FOOTER)
             try:
                 val = self.edit_row.edit_col.get_data()
             except ValueError:
@@ -256,12 +258,12 @@ class GridEditor(urwid.WidgetWrap):
 
     def __init__(
             self,
-            master: "mitmproxy.console.master.ConsoleMaster",
+            master: "mitmproxy.tools.console.master.ConsoleMaster",
             value: Any,
             callback: Callable[..., None],
             *cb_args,
             **cb_kwargs
-    ):
+    ) -> None:
         value = self.data_in(copy.deepcopy(value))
         self.master = master
         self.value = value
@@ -276,9 +278,11 @@ class GridEditor(urwid.WidgetWrap):
                 first_width = max(len(r), first_width)
         self.first_width = min(first_width, FIRST_WIDTH_MAX)
 
-        title = urwid.Text(self.title)
-        title = urwid.Padding(title, align="left", width=("relative", 100))
-        title = urwid.AttrWrap(title, "heading")
+        title = None
+        if self.title:
+            title = urwid.Text(self.title)
+            title = urwid.Padding(title, align="left", width=("relative", 100))
+            title = urwid.AttrWrap(title, "heading")
 
         headings = []
         for i, col in enumerate(self.columns):
@@ -297,10 +301,10 @@ class GridEditor(urwid.WidgetWrap):
         self.lb = GridListBox(self.walker)
         w = urwid.Frame(
             self.lb,
-            header=urwid.Pile([title, h])
+            header=urwid.Pile([title, h]) if title else None
         )
         super().__init__(w)
-        self.master.loop.widget.footer.update("")
+        signals.footer_help.send(self, helptext="")
         self.show_empty_msg()
 
     def show_empty_msg(self):
@@ -378,7 +382,7 @@ class GridEditor(urwid.WidgetWrap):
         """
             Return None, or a string error message.
         """
-        return False
+        return None
 
     def handle_key(self, key):
         return False

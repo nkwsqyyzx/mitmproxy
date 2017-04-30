@@ -1,11 +1,10 @@
 import urwid
 
-import mitmproxy.net.http.url
-from mitmproxy import exceptions
 from mitmproxy.tools.console import common
 from mitmproxy.tools.console import signals
 from mitmproxy.addons import view
 from mitmproxy import export
+import mitmproxy.tools.console.master # noqa
 
 
 def _mkhelp():
@@ -35,6 +34,7 @@ def _mkhelp():
         ("W", "stream flows to file"),
         ("X", "kill and delete flow, even if it's mid-intercept"),
         ("z", "clear flow list or eventlog"),
+        ("Z", "clear unmarked flows"),
         ("tab", "tab between eventlog and flow list"),
         ("enter", "view flow"),
         ("|", "run script on this flow"),
@@ -56,6 +56,10 @@ class LogBufferBox(urwid.ListBox):
         self.master = master
         urwid.ListBox.__init__(self, master.logbuffer)
 
+    def set_focus(self, index):
+        if 0 <= index < len(self.master.logbuffer):
+            super().set_focus(index)
+
     def keypress(self, size, key):
         key = common.shortcuts(key)
         if key == "z":
@@ -65,9 +69,6 @@ class LogBufferBox(urwid.ListBox):
             self.set_focus(len(self.master.logbuffer) - 1)
         elif key == "g":
             self.set_focus(0)
-        elif key == "F":
-            o = self.master.options
-            o.focus_follow = not o.focus_follow
         return urwid.ListBox.keypress(self, size, key)
 
 
@@ -101,9 +102,6 @@ class BodyPile(urwid.Pile):
             else:
                 self.widget_list[1].header = self.inactive_header
             key = None
-        elif key == "e":
-            self.master.toggle_eventlog()
-            key = None
 
         # This is essentially a copypasta from urwid.Pile's keypress handler.
         # So much for "closed for modification, but open for extension".
@@ -134,27 +132,6 @@ class FlowItem(urwid.WidgetWrap):
     def selectable(self):
         return True
 
-    def save_flows_prompt(self, k):
-        if k == "l":
-            signals.status_prompt_path.send(
-                prompt = "Save listed flows to",
-                callback = self.master.save_flows
-            )
-        else:
-            signals.status_prompt_path.send(
-                prompt = "Save this flow to",
-                callback = self.master.save_one_flow,
-                args = (self.flow,)
-            )
-
-    def server_replay_prompt(self, k):
-        a = self.master.addons.get("serverplayback")
-        if k == "a":
-            a.load([i.copy() for i in self.master.view])
-        elif k == "t":
-            a.load([self.flow.copy()])
-        signals.update_settings.send(self)
-
     def mouse_event(self, size, event, button, col, row, focus):
         if event == "mouse press" and button == 1:
             if self.flow.request:
@@ -164,84 +141,7 @@ class FlowItem(urwid.WidgetWrap):
     def keypress(self, xxx_todo_changeme, key):
         (maxcol,) = xxx_todo_changeme
         key = common.shortcuts(key)
-        if key == "a":
-            self.flow.resume()
-            self.master.view.update(self.flow)
-        elif key == "d":
-            if self.flow.killable:
-                self.flow.kill()
-            self.master.view.remove(self.flow)
-        elif key == "D":
-            cp = self.flow.copy()
-            self.master.view.add(cp)
-            self.master.view.focus.flow = cp
-        elif key == "m":
-            self.flow.marked = not self.flow.marked
-            signals.flowlist_change.send(self)
-        elif key == "r":
-            try:
-                self.master.replay_request(self.flow)
-            except exceptions.ReplayException as e:
-                signals.add_log("Replay error: %s" % e, "warn")
-            signals.flowlist_change.send(self)
-        elif key == "S":
-            def stop_server_playback(response):
-                if response == "y":
-                    self.master.options.server_replay = []
-            a = self.master.addons.get("serverplayback")
-            if a.count():
-                signals.status_prompt_onekey.send(
-                    prompt = "Stop current server replay?",
-                    keys = (
-                        ("yes", "y"),
-                        ("no", "n"),
-                    ),
-                    callback = stop_server_playback,
-                )
-            else:
-                signals.status_prompt_onekey.send(
-                    prompt = "Server Replay",
-                    keys = (
-                        ("all flows", "a"),
-                        ("this flow", "t"),
-                    ),
-                    callback = self.server_replay_prompt,
-                )
-        elif key == "U":
-            for f in self.master.view:
-                f.marked = False
-            signals.flowlist_change.send(self)
-        elif key == "V":
-            if not self.flow.modified():
-                signals.status_message.send(message="Flow not modified.")
-                return
-            self.flow.revert()
-            signals.flowlist_change.send(self)
-            signals.status_message.send(message="Reverted.")
-        elif key == "w":
-            signals.status_prompt_onekey.send(
-                self,
-                prompt = "Save",
-                keys = (
-                    ("listed flows", "l"),
-                    ("this flow", "t"),
-                ),
-                callback = self.save_flows_prompt,
-            )
-        elif key == "X":
-            if self.flow.killable:
-                self.flow.kill()
-                self.master.view.update(self.flow)
-        elif key == "enter":
-            if self.flow.request:
-                self.master.view_flow(self.flow)
-        elif key == "|":
-            signals.status_prompt_path.send(
-                prompt = "Send flow to script",
-                callback = self.master.run_script_once,
-                args = (self.flow,)
-            )
-        elif key == "E":
+        if key == "E":
             signals.status_prompt_onekey.send(
                 self,
                 prompt = "Export to file",
@@ -249,14 +149,14 @@ class FlowItem(urwid.WidgetWrap):
                 callback = common.export_to_clip_or_file,
                 args = (None, self.flow, common.ask_save_path)
             )
-        elif key == "C":
-            signals.status_prompt_onekey.send(
-                self,
-                prompt = "Export to clipboard",
-                keys = [(e[0], e[1]) for e in export.EXPORTERS],
-                callback = common.export_to_clip_or_file,
-                args = (None, self.flow, common.copy_to_clipboard_or_prompt)
-            )
+        # elif key == "C":
+        #     signals.status_prompt_onekey.send(
+        #         self,
+        #         prompt = "Export to clipboard",
+        #         keys = [(e[0], e[1]) for e in export.EXPORTERS],
+        #         callback = common.export_to_clip_or_file,
+        #         args = (None, self.flow, common.copy_to_clipboard_or_prompt)
+        #     )
         elif key == "b":
             common.ask_save_body(None, self.flow)
         else:
@@ -305,7 +205,9 @@ class FlowListWalker(urwid.ListWalker):
 
 class FlowListBox(urwid.ListBox):
 
-    def __init__(self, master: "mitmproxy.tools.console.master.ConsoleMaster"):
+    def __init__(
+        self, master: "mitmproxy.tools.console.master.ConsoleMaster"
+    ) -> None:
         self.master = master  # type: "mitmproxy.tools.console.master.ConsoleMaster"
         super().__init__(FlowListWalker(master))
 
@@ -337,38 +239,16 @@ class FlowListBox(urwid.ListBox):
         )
 
     def new_request(self, url, method):
-        parts = mitmproxy.net.http.url.parse(str(url))
-        if not parts:
-            signals.status_message.send(message="Invalid Url")
+        try:
+            f = self.master.create_request(method, url)
+        except ValueError as e:
+            signals.status_message.send(message = "Invalid URL: " + str(e))
             return
-        scheme, host, port, path = parts
-        f = self.master.create_request(method, scheme, host, port, path)
         self.master.view.focus.flow = f
 
     def keypress(self, size, key):
         key = common.shortcuts(key)
-        if key == "A":
-            for f in self.master.view:
-                if f.intercepted:
-                    f.resume()
-                    self.master.view.update(f)
-        elif key == "z":
-            self.master.view.clear()
-        elif key == "e":
-            self.master.toggle_eventlog()
-        elif key == "g":
-            if len(self.master.view):
-                self.master.view.focus.index = 0
-        elif key == "G":
-            if len(self.master.view):
-                self.master.view.focus.index = len(self.master.view) - 1
-        elif key == "f":
-            signals.status_prompt.send(
-                prompt = "Filter View",
-                text = self.master.options.filter,
-                callback = self.master.options.setter("filter")
-            )
-        elif key == "L":
+        if key == "L":
             signals.status_prompt_path.send(
                 self,
                 prompt = "Load flows",
@@ -387,27 +267,12 @@ class FlowListBox(urwid.ListBox):
             lookup = dict([(i[0], i[1]) for i in view.orders])
 
             def change_order(k):
-                self.master.options.order = lookup[k]
+                self.master.options.console_order = lookup[k]
 
             signals.status_prompt_onekey.send(
                 prompt = "Order",
                 keys = orders,
                 callback = change_order
             )
-        elif key == "F":
-            o = self.master.options
-            o.focus_follow = not o.focus_follow
-        elif key == "v":
-            val = not self.master.options.order_reversed
-            self.master.options.order_reversed = val
-        elif key == "W":
-            if self.master.options.streamfile:
-                self.master.options.streamfile = None
-            else:
-                signals.status_prompt_path.send(
-                    self,
-                    prompt="Stream flows to",
-                    callback= lambda path: self.master.options.update(streamfile=path)
-                )
         else:
             return urwid.ListBox.keypress(self, size, key)

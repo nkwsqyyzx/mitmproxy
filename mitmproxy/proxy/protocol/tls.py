@@ -200,6 +200,21 @@ CIPHER_ID_NAME_MAP = {
 }
 
 
+# We manually need to specify this, otherwise OpenSSL may select a non-HTTP2 cipher by default.
+# https://mozilla.github.io/server-side-tls/ssl-config-generator/?server=apache-2.2.15&openssl=1.0.2&hsts=yes&profile=old
+DEFAULT_CLIENT_CIPHERS = (
+    "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:"
+    "ECDHE-ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-DSS-AES128-GCM-SHA256:kEDH+AESGCM:"
+    "ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES128-SHA:"
+    "ECDHE-RSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA384:ECDHE-RSA-AES256-SHA:ECDHE-ECDSA-AES256-SHA:"
+    "DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-DSS-AES128-SHA256:DHE-RSA-AES256-SHA256:DHE-DSS-AES256-SHA:"
+    "DHE-RSA-AES256-SHA:ECDHE-RSA-DES-CBC3-SHA:ECDHE-ECDSA-DES-CBC3-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:"
+    "AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:AES:DES-CBC3-SHA:"
+    "HIGH:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!aECDH:"
+    "!EDH-DSS-DES-CBC3-SHA:!EDH-RSA-DES-CBC3-SHA:!KRB5-DES-CBC3-SHA"
+)
+
+
 def is_tls_record_magic(d):
     """
     Returns:
@@ -358,7 +373,7 @@ class TlsLayer(base.Layer):
         #  2.5 The client did not sent a SNI value, we don't know the certificate subject.
         client_tls_requires_server_connection = (
             self._server_tls and
-            not self.config.options.no_upstream_cert and
+            self.config.options.upstream_cert and
             (
                 self.config.options.add_upstream_certs_to_client_chain or
                 self._client_tls and (
@@ -475,7 +490,7 @@ class TlsLayer(base.Layer):
                 cert, key,
                 method=self.config.openssl_method_client,
                 options=self.config.openssl_options_client,
-                cipher_list=self.config.options.ciphers_client,
+                cipher_list=self.config.options.ciphers_client or DEFAULT_CLIENT_CIPHERS,
                 dhparams=self.config.certstore.dhparams,
                 chain_file=chain_file,
                 alpn_select_callback=self.__alpn_select_callback,
@@ -527,7 +542,7 @@ class TlsLayer(base.Layer):
                 ciphers_server = ':'.join(ciphers_server)
 
             self.server_conn.establish_ssl(
-                self.config.clientcerts,
+                self.config.client_certs,
                 self.server_sni,
                 method=self.config.openssl_method_server,
                 options=self.config.openssl_options_server,
@@ -545,8 +560,9 @@ class TlsLayer(base.Layer):
             raise exceptions.InvalidServerCertificate(str(e))
         except exceptions.TlsException as e:
             raise exceptions.TlsProtocolException(
-                "Cannot establish TLS with {address} (sni: {sni}): {e}".format(
-                    address=repr(self.server_conn.address),
+                "Cannot establish TLS with {host}:{port} (sni: {sni}): {e}".format(
+                    host=self.server_conn.address[0],
+                    port=self.server_conn.address[1],
                     sni=self.server_sni,
                     e=repr(e)
                 )
@@ -567,13 +583,13 @@ class TlsLayer(base.Layer):
         # However, we may just want to establish TLS so that we can send an error message to the client,
         # in which case the address can be None.
         if self.server_conn.address:
-            host = self.server_conn.address.host.encode("idna")
+            host = self.server_conn.address[0].encode("idna")
 
         # Should we incorporate information from the server certificate?
         use_upstream_cert = (
             self.server_conn and
             self.server_conn.tls_established and
-            (not self.config.options.no_upstream_cert)
+            self.config.options.upstream_cert
         )
         if use_upstream_cert:
             upstream_cert = self.server_conn.cert

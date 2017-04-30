@@ -20,7 +20,7 @@ You can use Homebrew to install everything:
 
     brew install mitmproxy
 
-Or you can download the pre-built binary packages from `mitmproxy.org`_.
+Or you can download the pre-built binary packages from our `releases`_.
 
 
 .. _install-windows:
@@ -44,7 +44,7 @@ Installation on Linux
 ---------------------
 
 The recommended way to run mitmproxy on Linux is to use the pre-built binaries
-provided at `mitmproxy.org`_.
+provided at `releases`_.
 
 Our pre-built binaries provide you with the latest version of mitmproxy, a
 self-contained Python 3.5 environment and a recent version of OpenSSL that
@@ -85,7 +85,7 @@ libraries. This was tested on a fully patched installation of Ubuntu 16.04.
 
 .. code:: bash
 
-   sudo apt-get install python3-pip python3-dev libffi-dev libssl-dev libtiff5-dev libjpeg8-dev zlib1g-dev libwebp-dev
+   sudo apt-get install python3-dev python3-pip libffi-dev libssl-dev
    sudo pip3 install mitmproxy  # or pip3 install --user mitmproxy
 
 On older Ubuntu versions, e.g., **12.04** and **14.04**, you may need to install
@@ -104,17 +104,31 @@ libraries. This was tested on a fully patched installation of Fedora 24.
 
 .. code:: bash
 
-   sudo dnf install make gcc redhat-rpm-config python3-pip python3-devel libffi-devel openssl-devel libtiff-devel libjpeg-devel zlib-devel libwebp-devel openjpeg2-devel
+   sudo dnf install make gcc redhat-rpm-config python3-devel python3-pip libffi-devel openssl-devel
    sudo pip3 install mitmproxy  # or pip3 install --user mitmproxy
 
 Make sure to have an up-to-date version of pip by running ``pip3 install -U pip``.
 
 
+.. _install-source-opensuse:
+
+Installation from Source on openSUSE
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This was tested on a fully patched installation of openSUSE Tumbleweed.
+Please note that openSUSE Leap 42.2 only comes with Python 3.4.x, whereas mitmproxy requires Python 3.5 or above.
+You can check you Python version by running ``python3 --version``.
+
+.. code:: bash
+
+   sudo zypper install python3-pip python3-devel libffi-devel openssl-devel gcc-c++
+   sudo pip3 install mitmproxy
+
 
 .. _install-source-windows:
 
-🐱💻 Installation from Source on Windows
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Installation from Source on Windows
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. note::
     Mitmproxy's console interface is not supported on Windows, but you can use
@@ -139,11 +153,12 @@ Latest Development Version
 If you would like to install mitmproxy directly from the master branch on GitHub
 or would like to get set up to contribute to the project, install the
 dependencies as you would for a regular installation from source. Then see the
-Hacking_ section of the README on GitHub. You can check your system information
-by running: ``mitmproxy --sysinfo``
+project's README_ on GitHub. You can check your system information
+by running: ``mitmproxy --version``
 
 
-.. _Hacking: https://github.com/mitmproxy/mitmproxy/blob/master/README.rst#hacking
+.. _README: https://github.com/mitmproxy/mitmproxy/blob/master/README.rst
+.. _releases: https://github.com/mitmproxy/mitmproxy/releases
 .. _mitmproxy.org: https://mitmproxy.org/
 .. _`Python website`: https://www.python.org/downloads/windows/
 .. _pip: https://pip.pypa.io/en/latest/installing.html

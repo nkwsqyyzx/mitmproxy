@@ -226,13 +226,27 @@ header menu {
 }
 .filter-input .popover {
   top: 27px;
+  left: 43px;
   display: block;
   max-width: none;
   opacity: 0.9;
 }
+@media (max-width: 767px) {
+  .filter-input .popover {
+    top: 16px;
+    left: 29px;
+    right: 2px;
+  }
+}
 .filter-input .popover .popover-content {
   max-height: 500px;
   overflow-y: auto;
+}
+.filter-input .popover .popover-content tr {
+  cursor: pointer;
+}
+.filter-input .popover .popover-content tr:hover {
+  background-color: rgba(193, 215, 235, 0.5) !important;
 }
 .flow-table {
   width: 100%;
@@ -358,8 +372,7 @@ header menu {
   background-color: #F2F2F2;
 }
 .flow-detail section {
-  display: flex;
-  flex-direction: column;
+  overflow-y: scroll;
 }
 .flow-detail section > article {
   overflow: auto;
@@ -564,7 +577,6 @@ footer .label {
 .CodeMirror {
   border: 1px solid #ccc;
   height: auto !important;
-  max-height: 2048px !important;
 }
 /* BASICS */
 
@@ -774,9 +786,6 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket {color: #f22;}
   display: inline-block;
   vertical-align: top;
   margin-bottom: -30px;
-  /* Hack to make IE7 behave */
-  *zoom:1;
-  *display:inline;
 }
 .CodeMirror-gutter-wrapper {
   position: absolute;
@@ -794,11 +803,8 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket {color: #f22;}
   cursor: default;
   z-index: 4;
 }
-.CodeMirror-gutter-wrapper {
-  -webkit-user-select: none;
-  -moz-user-select: none;
-  user-select: none;
-}
+.CodeMirror-gutter-wrapper ::selection { background-color: transparent }
+.CodeMirror-gutter-wrapper ::-moz-selection { background-color: transparent }
 
 .CodeMirror-lines {
   cursor: text;
@@ -820,8 +826,8 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket {color: #f22;}
   position: relative;
   overflow: visible;
   -webkit-tap-highlight-color: transparent;
-  -webkit-font-variant-ligatures: none;
-  font-variant-ligatures: none;
+  -webkit-font-variant-ligatures: contextual;
+  font-variant-ligatures: contextual;
 }
 .CodeMirror-wrap pre {
   word-wrap: break-word;
@@ -842,6 +848,8 @@ div.CodeMirror span.CodeMirror-nonmatchingbracket {color: #f22;}
 }
 
 .CodeMirror-widget {}
+
+.CodeMirror-rtl pre { direction: rtl; }
 
 .CodeMirror-code {
   outline: none;
@@ -894,9 +902,6 @@ div.CodeMirror-dragcursors {
   background: #ffa;
   background: rgba(255, 255, 0, .4);
 }
-
-/* IE7 hack to prevent it from returning funny offsetTops on the spans */
-.CodeMirror span { *vertical-align: text-bottom; }
 
 /* Used to force a border model for a node */
 .cm-force-border { padding-right: .1px; }

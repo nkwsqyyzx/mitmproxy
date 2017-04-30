@@ -1,4 +1,5 @@
 from typing import List
+import pytest
 
 from mitmproxy.stateobject import StateObject
 
@@ -17,15 +18,20 @@ class Child(StateObject):
         obj.set_state(state)
         return obj
 
+    def __eq__(self, other):
+        return isinstance(other, Child) and self.x == other.x
+
 
 class Container(StateObject):
     def __init__(self):
         self.child = None
         self.children = None
+        self.dictionary = None
 
     _stateobject_attributes = dict(
         child=Child,
         children=List[Child],
+        dictionary=dict,
     )
 
     @classmethod
@@ -58,6 +64,38 @@ def test_container_list():
     a.children = [Child(42), Child(44)]
     assert a.get_state() == {
         "child": None,
-        "children": [{"x": 42}, {"x": 44}]
+        "children": [{"x": 42}, {"x": 44}],
+        "dictionary": None,
     }
-    assert len(a.copy().children) == 2
+    copy = a.copy()
+    assert len(copy.children) == 2
+    assert copy.children is not a.children
+    assert copy.children[0] is not a.children[0]
+    assert Container.from_state(a.get_state())
+
+
+def test_container_dict():
+    a = Container()
+    a.dictionary = dict()
+    a.dictionary['foo'] = 'bar'
+    a.dictionary['bar'] = Child(44)
+    assert a.get_state() == {
+        "child": None,
+        "children": None,
+        "dictionary": {'bar': {'x': 44}, 'foo': 'bar'},
+    }
+    copy = a.copy()
+    assert len(copy.dictionary) == 2
+    assert copy.dictionary is not a.dictionary
+    assert copy.dictionary['bar'] is not a.dictionary['bar']
+
+
+def test_too_much_state():
+    a = Container()
+    a.child = Child(42)
+    s = a.get_state()
+    s['foo'] = 'bar'
+    b = Container()
+
+    with pytest.raises(RuntimeWarning):
+        b.set_state(s)
